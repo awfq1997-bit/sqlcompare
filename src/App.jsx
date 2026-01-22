@@ -1,7 +1,18 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Database, Settings, Play, CheckCircle, AlertCircle, ChevronRight, Server, ArrowRightLeft, EyeOff, Key, RotateCcw, Upload, FileType, X, Loader2, AlertTriangle, Wand2, Search, CheckSquare, Square, ArrowLeft, Download, UploadCloud, GripVertical, ChevronLeft, ChevronRight as ChevronRightIcon, Filter } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { 
+  Database, Settings, Play, CheckCircle, AlertCircle, ChevronRight, Server, 
+  ArrowRightLeft, EyeOff, Key, RotateCcw, Upload, FileType, X, Loader2, 
+  AlertTriangle, Wand2, Search, CheckSquare, Square, ArrowLeft, Download, 
+  UploadCloud, GripVertical, ChevronLeft, ChevronRight as ChevronRightIcon, 
+  Filter, FileSpreadsheet, Home, Table, Eye, MousePointer2, Info
+} from 'lucide-react';
 
-// --- 工具函数：Levenshtein 距离计算 ---
+/* ==========================================================================
+   1. 工具函数 (Utilities)
+   建议拆分为: src/utils.js
+   ========================================================================== 
+*/
+
 const getLevenshteinDistance = (a, b) => {
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
@@ -20,7 +31,120 @@ const getLevenshteinDistance = (a, b) => {
   return matrix[b.length][a.length];
 };
 
-// --- 核心对比算法 ---
+const loadXlsxLib = async () => {
+    if (window.XLSX) return window.XLSX;
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        script.onload = () => resolve(window.XLSX);
+        script.onerror = () => reject(new Error('无法加载 Excel 解析库 (XLSX)'));
+        document.body.appendChild(script);
+    });
+};
+
+const loadSqlJs = async () => {
+    if (window.initSqlJs) return window.initSqlJs;
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js';
+      script.onload = () => resolve(window.initSqlJs);
+      script.onerror = () => reject(new Error('无法从 CDN 加载 sql.js，请检查网络连接'));
+      document.body.appendChild(script);
+    });
+};
+
+/* ==========================================================================
+   2. 通用 UI 组件 (Common UI)
+   建议拆分为: src/components/common/
+   ========================================================================== 
+*/
+
+const ResizableSidebar = ({ width, setWidth, children, minWidth = 200, maxWidth = 800 }) => {
+    const isResizing = useRef(false);
+    const sidebarRef = useRef(null);
+
+    const startResizing = useCallback((e) => {
+        e.preventDefault();
+        isResizing.current = true;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    }, []);
+
+    const stopResizing = useCallback(() => {
+        isResizing.current = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    }, []);
+
+    const resize = useCallback((mouseMoveEvent) => {
+            if (isResizing.current && sidebarRef.current) {
+                const sidebarRect = sidebarRef.current.getBoundingClientRect();
+                const newWidth = mouseMoveEvent.clientX - sidebarRect.left;
+                if (newWidth >= minWidth && newWidth <= maxWidth) {
+                    setWidth(newWidth);
+                }
+            }
+        }, [minWidth, maxWidth, setWidth]);
+
+    useEffect(() => {
+        window.addEventListener("mousemove", resize);
+        window.addEventListener("mouseup", stopResizing);
+        return () => {
+            window.removeEventListener("mousemove", resize);
+            window.removeEventListener("mouseup", stopResizing);
+        };
+    }, [resize, stopResizing]);
+
+    return (
+        <div ref={sidebarRef} className="flex flex-col border-r border-slate-200 bg-slate-50 relative shrink-0" style={{ width: width }}>
+            {children}
+            <div
+                className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-400 transition-colors z-20 flex items-center justify-center group opacity-0 hover:opacity-100"
+                onMouseDown={startResizing}
+            >
+                <div className="w-0.5 h-full bg-blue-400"></div>
+            </div>
+        </div>
+    );
+};
+
+// 新增：悬浮气泡组件
+const DiffTooltip = ({ data }) => {
+    if (!data) return null;
+    const { x, y, oldVal, newVal } = data;
+    
+    return (
+        <div 
+            className="fixed z-50 bg-white border border-slate-200 rounded-lg shadow-xl p-3 text-sm animate-in fade-in zoom-in-95 duration-150 pointer-events-none max-w-xs"
+            style={{ top: y - 10, left: x, transform: 'translate(-50%, -100%)' }}
+        >
+            <div className="flex flex-col gap-2">
+                <div className="bg-red-50 text-red-800 px-2 py-1 rounded border border-red-100">
+                    <span className="text-xs font-bold text-red-500 block mb-0.5">变更前 (Old):</span>
+                    <span className="break-words font-mono">{String(oldVal)}</span>
+                </div>
+                <div className="flex justify-center">
+                    <div className="bg-slate-100 rounded-full p-0.5">
+                        <ChevronRightIcon className="w-3 h-3 text-slate-400 rotate-90" />
+                    </div>
+                </div>
+                <div className="bg-emerald-50 text-emerald-800 px-2 py-1 rounded border border-emerald-100">
+                    <span className="text-xs font-bold text-emerald-500 block mb-0.5">变更后 (New):</span>
+                    <span className="break-words font-mono">{String(newVal)}</span>
+                </div>
+            </div>
+            {/* Arrow */}
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 w-3 h-3 bg-white border-b border-r border-slate-200 rotate-45"></div>
+        </div>
+    );
+};
+
+/* ==========================================================================
+   3. SQL 对比模块 (SQL Module)
+   建议拆分为: src/components/SqlComparator/
+   ========================================================================== 
+*/
+
 const compareTableData = (tableName, config, data1, data2, columnRegex) => {
   const { pks, ignore } = config;
   const results = { added: [], removed: [], changed: [], identicalCount: 0 };
@@ -36,7 +160,6 @@ const compareTableData = (tableName, config, data1, data2, columnRegex) => {
             const match = strVal.match(regex);
             return match ? match[0] : ''; 
         } catch (e) {
-            console.warn(`Invalid regex for ${tableName}.${col}:`, e);
             return strVal;
         }
     }
@@ -47,7 +170,6 @@ const compareTableData = (tableName, config, data1, data2, columnRegex) => {
 
   const map1 = new Map();
   data1.forEach(row => map1.set(getPkKey(row), row));
-  
   const map2Keys = new Set(); 
 
   data2.forEach(row2 => {
@@ -65,10 +187,8 @@ const compareTableData = (tableName, config, data1, data2, columnRegex) => {
       
       allCols.forEach(col => {
         if (ignore.includes(col) || pks.includes(col)) return;
-        
         const val1 = row1[col];
         const val2 = row2[col];
-
         const str1 = processValue(val1, col);
         const str2 = processValue(val2, col);
 
@@ -95,61 +215,8 @@ const compareTableData = (tableName, config, data1, data2, columnRegex) => {
   return results;
 };
 
-// --- 组件定义 ---
-
-const ResizableSidebar = ({ width, setWidth, children, minWidth = 200, maxWidth = 800 }) => {
-    const isResizing = useRef(false);
-    const sidebarRef = useRef(null);
-
-    const startResizing = React.useCallback((e) => {
-        e.preventDefault();
-        isResizing.current = true;
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-    }, []);
-
-    const stopResizing = React.useCallback(() => {
-        isResizing.current = false;
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-    }, []);
-
-    const resize = React.useCallback(
-        (mouseMoveEvent) => {
-            if (isResizing.current && sidebarRef.current) {
-                const sidebarRect = sidebarRef.current.getBoundingClientRect();
-                const newWidth = mouseMoveEvent.clientX - sidebarRect.left;
-                if (newWidth >= minWidth && newWidth <= maxWidth) {
-                    setWidth(newWidth);
-                }
-            }
-        },
-        [minWidth, maxWidth, setWidth]
-    );
-
-    useEffect(() => {
-        window.addEventListener("mousemove", resize);
-        window.addEventListener("mouseup", stopResizing);
-        return () => {
-            window.removeEventListener("mousemove", resize);
-            window.removeEventListener("mouseup", stopResizing);
-        };
-    }, [resize, stopResizing]);
-
-    return (
-        <div ref={sidebarRef} className="flex flex-col border-r border-slate-200 bg-slate-50 relative shrink-0" style={{ width: width }}>
-            {children}
-            <div
-                className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-400 transition-colors z-20 flex items-center justify-center group opacity-0 hover:opacity-100"
-                onMouseDown={startResizing}
-            >
-                <div className="w-0.5 h-full bg-blue-400"></div>
-            </div>
-        </div>
-    );
-};
-
-const ConnectView = ({ files, setFiles, isProcessing, processingStatus, errorMsg, onProcess }) => {
+// ... SQL 子组件 (ConnectView, ConfigView, ReportView) 这里代码较长，保持原样，仅做结构折叠 ...
+const SqlConnectView = ({ files, setFiles, isProcessing, processingStatus, errorMsg, onProcess }) => {
   const handleFileSelect = (key, e) => {
     if (e.target.files && e.target.files[0]) {
       setFiles(prev => ({ ...prev, [key]: e.target.files[0] }));
@@ -158,7 +225,7 @@ const ConnectView = ({ files, setFiles, isProcessing, processingStatus, errorMsg
   const removeFile = (key) => setFiles(prev => ({ ...prev, [key]: null }));
 
   return (
-    <div className="w-full max-w-4xl mx-auto mt-10 p-8 bg-white rounded-xl shadow-lg border border-slate-100">
+    <div className="w-full max-w-4xl mx-auto mt-10 p-8 bg-white rounded-xl shadow-lg border border-slate-100 animate-in fade-in zoom-in duration-300">
       <div className="text-center mb-10">
         <div className="bg-emerald-100 p-4 rounded-full inline-block mb-4">
           <Database className="w-8 h-8 text-emerald-600" />
@@ -223,7 +290,7 @@ const ConnectView = ({ files, setFiles, isProcessing, processingStatus, errorMsg
   );
 };
 
-const ConfigView = ({ 
+const SqlConfigView = ({ 
     parsedData, tableConfigs, setTableConfigs, 
     activeTable, setActiveTable, 
     selectedTables, setSelectedTables,
@@ -231,6 +298,7 @@ const ConfigView = ({
     sidebarWidth, setSidebarWidth,
     isProcessing, setIsProcessing, setComparisonResults, setStep 
 }) => {
+    // ... SqlConfigView 代码保持不变 ...
     const columns = parsedData.db1.schema[activeTable] || [];
     const currentConfig = tableConfigs[activeTable] || { pks: [], ignore: [] };
     const currentRegex = columnRegex[activeTable] || {};
@@ -425,7 +493,7 @@ const ConfigView = ({
     };
 
     return (
-      <div className="flex h-[calc(100vh-140px)] bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden">
+      <div className="flex h-[calc(100vh-140px)] bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden animate-in fade-in zoom-in duration-300">
         <ResizableSidebar width={sidebarWidth} setWidth={setSidebarWidth}>
           <div className="p-4 border-b border-slate-200 font-semibold text-slate-700 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
@@ -577,7 +645,8 @@ const ConfigView = ({
     );
 };
 
-const ReportView = ({ comparisonResults, parsedData, activeTable, setActiveTable, setStep, sidebarWidth, setSidebarWidth }) => {
+const SqlReportView = ({ comparisonResults, parsedData, activeTable, setActiveTable, setStep, sidebarWidth, setSidebarWidth }) => {
+    // ... SqlReportView 代码保持不变 ...
     const [filterDiffOnly, setFilterDiffOnly] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
@@ -635,7 +704,7 @@ const ReportView = ({ comparisonResults, parsedData, activeTable, setActiveTable
     };
 
     return (
-      <div className="flex flex-1 w-full h-full bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden">
+      <div className="flex flex-1 w-full h-full bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden animate-in fade-in zoom-in duration-300">
         <ResizableSidebar width={sidebarWidth} setWidth={setSidebarWidth}>
             <div className="p-4 border-b border-slate-200 bg-white shrink-0">
                 <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2">
@@ -796,172 +865,153 @@ const ReportView = ({ comparisonResults, parsedData, activeTable, setActiveTable
     );
 };
 
-export default function DBComparatorApp() {
-  const [step, setStep] = useState('connect');
-  const [files, setFiles] = useState({ db1: null, db2: null });
-  
-  const [parsedData, setParsedData] = useState({ 
-    db1: { tables: {}, schema: {}, realPks: {} }, 
-    db2: { tables: {}, schema: {}, realPks: {} } 
-  });
-
-  const [tableConfigs, setTableConfigs] = useState({});
-  const [activeTable, setActiveTable] = useState('');
-  const [comparisonResults, setComparisonResults] = useState(null);
-  
-  const [selectedTables, setSelectedTables] = useState(new Set()); 
-  const [columnRegex, setColumnRegex] = useState({}); 
-  const [sidebarWidth, setSidebarWidth] = useState(288); 
-
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingStatus, setProcessingStatus] = useState('');
-  const [errorMsg, setErrorMsg] = useState(null);
-
-  const loadSqlJs = async () => {
-    if (window.initSqlJs) return window.initSqlJs;
-
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js';
-      script.onload = () => {
-        resolve(window.initSqlJs);
-      };
-      script.onerror = () => reject(new Error('无法从 CDN 加载 sql.js，请检查网络连接'));
-      document.body.appendChild(script);
-    });
-  };
-
-  const parseSqliteFile = async (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const uInt8Array = new Uint8Array(reader.result);
-          const initSqlJs = await loadSqlJs();
-          const SQL = await initSqlJs({
-            locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
-          });
-          
-          const db = new SQL.Database(uInt8Array);
-          
-          const tablesResult = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
-          if (!tablesResult.length) {
-            resolve({ tables: {}, schema: {}, realPks: {} });
-            return;
-          }
-          
-          const tableNames = tablesResult[0].values.map(v => v[0]);
-          const resultData = { tables: {}, schema: {}, realPks: {} };
-
-          for (const tableName of tableNames) {
-            const dataRes = db.exec(`SELECT * FROM "${tableName}"`);
-            let columns = [];
-            let rows = [];
-
-            if (dataRes.length > 0) {
-                columns = dataRes[0].columns;
-                const values = dataRes[0].values;
-                rows = values.map(row => {
-                    const rowObj = {};
-                    columns.forEach((col, idx) => rowObj[col] = row[idx]);
-                    return rowObj;
-                });
-            } else {
-                const schemaRes = db.exec(`PRAGMA table_info("${tableName}")`);
-                if (schemaRes.length) {
-                    columns = schemaRes[0].values.map(row => row[1]); 
-                }
-            }
-
-            resultData.tables[tableName] = rows;
-            resultData.schema[tableName] = columns;
-
-            const infoRes = db.exec(`PRAGMA table_info("${tableName}")`);
-            const pks = [];
-            if (infoRes.length > 0) {
-                infoRes[0].values.forEach(row => {
-                    const colName = row[1];
-                    const isPk = row[5]; 
-                    if (isPk > 0) pks.push(colName);
-                });
-            }
-            resultData.realPks[tableName] = pks;
-          }
-          
-          db.close();
-          resolve(resultData);
-        } catch (err) {
-          reject(err);
-        }
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsArrayBuffer(file);
-    });
-  };
-
-  const handleProcessFiles = async () => {
-    if (!files.db1 || !files.db2) return;
+const SqlComparator = () => {
+    // ... SqlComparator 逻辑保持不变 ...
+    const [step, setStep] = useState('connect');
+    const [files, setFiles] = useState({ db1: null, db2: null });
     
-    setIsProcessing(true);
-    setErrorMsg(null);
-    try {
-        setProcessingStatus(`正在加载解析库...`);
-        await loadSqlJs();
-
-        setProcessingStatus(`正在解析 ${files.db1.name}...`);
-        const db1Data = await parseSqliteFile(files.db1);
-        
-        setProcessingStatus(`正在解析 ${files.db2.name}...`);
-        const db2Data = await parseSqliteFile(files.db2);
-        
-        const tables1 = Object.keys(db1Data.tables);
-        const tables2 = Object.keys(db2Data.tables);
-        const commonTables = tables1.filter(t => tables2.includes(t));
-        
-        if (commonTables.length === 0) {
-            throw new Error("两个数据库中没有发现同名的表，无法进行对比。");
-        }
-
-        const initialConfig = {};
-        commonTables.forEach(table => {
-            let detectedPks = db1Data.realPks[table] || [];
-            if (detectedPks.length === 0) {
-                const cols = db1Data.schema[table] || [];
-                const guess = cols.find(c => /^(id|uuid|code|_id)$/i.test(c)) || 
-                              cols.find(c => c.toLowerCase().includes('id'));
-                if (guess) {
-                    detectedPks = [guess];
-                } else if (cols.length > 0) {
-                    detectedPks = [cols[0]];
-                }
+    const [parsedData, setParsedData] = useState({ 
+      db1: { tables: {}, schema: {}, realPks: {} }, 
+      db2: { tables: {}, schema: {}, realPks: {} } 
+    });
+  
+    const [tableConfigs, setTableConfigs] = useState({});
+    const [activeTable, setActiveTable] = useState('');
+    const [comparisonResults, setComparisonResults] = useState(null);
+    
+    const [selectedTables, setSelectedTables] = useState(new Set()); 
+    const [columnRegex, setColumnRegex] = useState({}); 
+    const [sidebarWidth, setSidebarWidth] = useState(288); 
+  
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [processingStatus, setProcessingStatus] = useState('');
+    const [errorMsg, setErrorMsg] = useState(null);
+  
+    const parseSqliteFile = async (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const uInt8Array = new Uint8Array(reader.result);
+            const initSqlJs = await loadSqlJs();
+            const SQL = await initSqlJs({
+              locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+            });
+            
+            const db = new SQL.Database(uInt8Array);
+            
+            const tablesResult = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+            if (!tablesResult.length) {
+              resolve({ tables: {}, schema: {}, realPks: {} });
+              return;
             }
-            initialConfig[table] = { pks: detectedPks, ignore: [] };
-        });
-
-        setParsedData({ db1: db1Data, db2: db2Data });
-        setTableConfigs(initialConfig);
-        setSelectedTables(new Set(commonTables)); 
-        setColumnRegex({}); 
-        setActiveTable(commonTables[0]);
-        setStep('config');
-
-    } catch (e) {
-        console.error(e);
-        setErrorMsg(e.message || "解析失败");
-    } finally {
-        setIsProcessing(false);
-        setProcessingStatus('');
-    }
-  };
-
-  return (
-    <div className="h-screen bg-slate-50 text-slate-800 font-sans flex flex-col overflow-hidden">
-        <header className="bg-slate-900 text-white shadow-lg shrink-0 z-50">
-            <div className="w-full px-6 h-14 flex items-center justify-between">
-                <div className="flex items-center gap-3"><Database className="w-6 h-6 text-emerald-400" /><h1 className="font-bold text-lg tracking-wide">SQLite Diff Pro <span className="opacity-50 font-normal">| 本地真实解析版</span></h1></div>
-            </div>
-        </header>
-        <main className="flex-1 w-full px-4 py-4 flex flex-col min-h-0">
+            
+            const tableNames = tablesResult[0].values.map(v => v[0]);
+            const resultData = { tables: {}, schema: {}, realPks: {} };
+  
+            for (const tableName of tableNames) {
+              const dataRes = db.exec(`SELECT * FROM "${tableName}"`);
+              let columns = [];
+              let rows = [];
+  
+              if (dataRes.length > 0) {
+                  columns = dataRes[0].columns;
+                  const values = dataRes[0].values;
+                  rows = values.map(row => {
+                      const rowObj = {};
+                      columns.forEach((col, idx) => rowObj[col] = row[idx]);
+                      return rowObj;
+                  });
+              } else {
+                  const schemaRes = db.exec(`PRAGMA table_info("${tableName}")`);
+                  if (schemaRes.length) {
+                      columns = schemaRes[0].values.map(row => row[1]); 
+                  }
+              }
+  
+              resultData.tables[tableName] = rows;
+              resultData.schema[tableName] = columns;
+  
+              const infoRes = db.exec(`PRAGMA table_info("${tableName}")`);
+              const pks = [];
+              if (infoRes.length > 0) {
+                  infoRes[0].values.forEach(row => {
+                      const colName = row[1];
+                      const isPk = row[5]; 
+                      if (isPk > 0) pks.push(colName);
+                  });
+              }
+              resultData.realPks[tableName] = pks;
+            }
+            
+            db.close();
+            resolve(resultData);
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(file);
+      });
+    };
+  
+    const handleProcessFiles = async () => {
+      if (!files.db1 || !files.db2) return;
+      
+      setIsProcessing(true);
+      setErrorMsg(null);
+      try {
+          setProcessingStatus(`正在加载解析库...`);
+          await loadSqlJs();
+  
+          setProcessingStatus(`正在解析 ${files.db1.name}...`);
+          const db1Data = await parseSqliteFile(files.db1);
+          
+          setProcessingStatus(`正在解析 ${files.db2.name}...`);
+          const db2Data = await parseSqliteFile(files.db2);
+          
+          const tables1 = Object.keys(db1Data.tables);
+          const tables2 = Object.keys(db2Data.tables);
+          const commonTables = tables1.filter(t => tables2.includes(t));
+          
+          if (commonTables.length === 0) {
+              throw new Error("两个数据库中没有发现同名的表，无法进行对比。");
+          }
+  
+          const initialConfig = {};
+          commonTables.forEach(table => {
+              let detectedPks = db1Data.realPks[table] || [];
+              if (detectedPks.length === 0) {
+                  const cols = db1Data.schema[table] || [];
+                  const guess = cols.find(c => /^(id|uuid|code|_id)$/i.test(c)) || 
+                                cols.find(c => c.toLowerCase().includes('id'));
+                  if (guess) {
+                      detectedPks = [guess];
+                  } else if (cols.length > 0) {
+                      detectedPks = [cols[0]];
+                  }
+              }
+              initialConfig[table] = { pks: detectedPks, ignore: [] };
+          });
+  
+          setParsedData({ db1: db1Data, db2: db2Data });
+          setTableConfigs(initialConfig);
+          setSelectedTables(new Set(commonTables)); 
+          setColumnRegex({}); 
+          setActiveTable(commonTables[0]);
+          setStep('config');
+  
+      } catch (e) {
+          console.error(e);
+          setErrorMsg(e.message || "解析失败");
+      } finally {
+          setIsProcessing(false);
+          setProcessingStatus('');
+      }
+    };
+  
+    return (
+        <div className="flex flex-col h-full">
             <div className="mb-4 flex justify-center shrink-0">
                 <div className="flex items-center text-sm font-medium">
                     <span className={step === 'connect' ? 'text-emerald-600' : 'text-slate-400'}>1. 上传与解析</span>
@@ -972,7 +1022,7 @@ export default function DBComparatorApp() {
                 </div>
             </div>
             <div className="flex-1 min-h-0 w-full flex flex-col">
-                {step === 'connect' && <ConnectView 
+                {step === 'connect' && <SqlConnectView 
                     files={files} 
                     setFiles={setFiles} 
                     isProcessing={isProcessing} 
@@ -980,7 +1030,7 @@ export default function DBComparatorApp() {
                     errorMsg={errorMsg} 
                     onProcess={handleProcessFiles} 
                 />}
-                {step === 'config' && <ConfigView 
+                {step === 'config' && <SqlConfigView 
                     parsedData={parsedData} 
                     tableConfigs={tableConfigs} 
                     setTableConfigs={setTableConfigs} 
@@ -997,7 +1047,7 @@ export default function DBComparatorApp() {
                     setComparisonResults={setComparisonResults} 
                     setStep={setStep} 
                 />}
-                {step === 'report' && <ReportView 
+                {step === 'report' && <SqlReportView 
                     comparisonResults={comparisonResults} 
                     parsedData={parsedData} 
                     activeTable={activeTable} 
@@ -1007,6 +1057,707 @@ export default function DBComparatorApp() {
                     setSidebarWidth={setSidebarWidth}
                 />}
             </div>
+        </div>
+    );
+};
+
+/* ==========================================================================
+   4. Excel 对比模块 (Excel Module)
+   建议拆分为: src/components/ExcelComparator/
+   ========================================================================== 
+*/
+
+const parseExcelFile = async (file) => {
+    const XLSX = await loadXlsxLib();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const result = {};
+                workbook.SheetNames.forEach(sheetName => {
+                    const worksheet = workbook.Sheets[sheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }); // header:1 返回二维数组
+                    result[sheetName] = jsonData;
+                });
+                resolve(result);
+            } catch (err) {
+                reject(err);
+            }
+        };
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+    });
+};
+
+const compareExcelSheets = (sheetData1, sheetData2) => {
+    const rows1 = sheetData1 || [];
+    const rows2 = sheetData2 || [];
+    const header1 = rows1[0] || [];
+    const header2 = rows2[0] || [];
+    const maxCols = Math.max(header1.length, header2.length);
+    const columns = Array.from({ length: maxCols }, (_, i) => header1[i] || header2[i] || `Col ${i+1}`);
+
+    let pkIndex = -1;
+    const findPk = (rows, header) => {
+        for (let i = 0; i < header.length; i++) {
+            const colName = String(header[i]).toLowerCase();
+            if (/id|code|no|key/.test(colName)) {
+                const values = new Set();
+                let isUnique = true;
+                for (let r = 1; r < rows.length; r++) {
+                    const val = rows[r][i];
+                    if (values.has(val)) { isUnique = false; break; }
+                    values.add(val);
+                }
+                if (isUnique && values.size > 0) return i;
+            }
+        }
+        return -1;
+    };
+
+    pkIndex = findPk(rows1, header1);
+    const diffResult = [];
+    const map1 = new Map();
+
+    for (let i = 1; i < rows1.length; i++) {
+        const key = pkIndex !== -1 ? String(rows1[i][pkIndex]) : `__row_${i}`;
+        map1.set(key, { row: rows1[i], index: i });
+    }
+
+    const processedKeys = new Set();
+    for (let i = 1; i < rows2.length; i++) {
+        const row2 = rows2[i];
+        const key = pkIndex !== -1 ? String(row2[pkIndex]) : `__row_${i}`;
+        processedKeys.add(key);
+
+        if (!map1.has(key)) {
+            diffResult.push({ type: 'add', data: row2, rowIndex: i });
+        } else {
+            const { row: row1 } = map1.get(key);
+            let isDiff = false;
+            const cellDiffs = {};
+            for (let c = 0; c < maxCols; c++) {
+                const val1 = row1[c];
+                const val2 = row2[c];
+                if (val1 != val2) { 
+                    isDiff = true;
+                    cellDiffs[c] = { old: val1, new: val2 };
+                }
+            }
+            if (isDiff) {
+                diffResult.push({ type: 'modify', data: row2, oldData: row1, diffs: cellDiffs, rowIndex: i });
+            } else {
+                diffResult.push({ type: 'same', data: row2, rowIndex: i });
+            }
+        }
+    }
+
+    map1.forEach((val, key) => {
+        if (!processedKeys.has(key)) {
+            diffResult.push({ type: 'remove', data: val.row, rowIndex: val.index });
+        }
+    });
+
+    // 虚拟合并视图构造 (简化版)
+    const mergedView = [];
+    if (pkIndex === -1) {
+        const maxLen = Math.max(rows1.length, rows2.length);
+        for(let i=1; i<maxLen; i++) {
+            const r1 = rows1[i];
+            const r2 = rows2[i];
+            if (r1 && !r2) mergedView.push({ type: 'remove', base: r1, target: null });
+            else if (!r1 && r2) mergedView.push({ type: 'add', base: null, target: r2 });
+            else {
+                let isDiff = false;
+                const diffs = {};
+                for(let c=0; c<maxCols; c++) {
+                    if (r1[c] != r2[c]) {
+                        isDiff = true;
+                        diffs[c] = { old: r1[c], new: r2[c] };
+                    }
+                }
+                mergedView.push({ type: isDiff ? 'modify' : 'same', base: r1, target: r2, diffs });
+            }
+        }
+    } else {
+        const processedPks = new Set();
+        for (let i=1; i<rows2.length; i++) {
+            const r2 = rows2[i];
+            const key = String(r2[pkIndex]);
+            processedPks.add(key);
+            if (map1.has(key)) {
+                const { row: r1 } = map1.get(key);
+                let isDiff = false;
+                const diffs = {};
+                for(let c=0; c<maxCols; c++) {
+                    if (r1[c] != r2[c]) {
+                        isDiff = true;
+                        diffs[c] = { old: r1[c], new: r2[c] };
+                    }
+                }
+                mergedView.push({ type: isDiff ? 'modify' : 'same', base: r1, target: r2, diffs });
+            } else {
+                mergedView.push({ type: 'add', base: null, target: r2 });
+            }
+        }
+        map1.forEach((val, key) => {
+            if (!processedPks.has(key)) {
+                mergedView.push({ type: 'remove', base: val.row, target: null });
+            }
+        });
+    }
+    return { columns, rows: mergedView, pkIndex };
+};
+
+const VirtualExcelTable = ({ columns, rows, showDiffOnly }) => {
+    const parentRef = useRef(null);
+    const [scrollTop, setScrollTop] = useState(0);
+    const [containerHeight, setContainerHeight] = useState(600); // 默认高度
+    const [hoveredTooltip, setHoveredTooltip] = useState(null); // Tooltip state
+    
+    const rowHeight = 40; 
+    const visibleCount = 20; 
+    const buffer = 10; 
+
+    const displayRows = useMemo(() => {
+        if (!showDiffOnly) return rows;
+        return rows.filter(r => r.type !== 'same');
+    }, [rows, showDiffOnly]);
+    
+    // 当 rows 改变时（例如切换 Sheet），重置滚动状态
+    useEffect(() => {
+        setScrollTop(0);
+        if (leftRef.current) leftRef.current.scrollTop = 0;
+        if (rightRef.current) rightRef.current.scrollTop = 0;
+    }, [rows]);
+
+    // 使用 leftRef 来测量容器实际高度
+    useEffect(() => {
+        const updateHeight = () => {
+             if (leftRef.current) {
+                 setContainerHeight(leftRef.current.clientHeight);
+             }
+        };
+        
+        // 初始测量
+        updateHeight();
+        
+        // 监听 resize
+        const observer = new ResizeObserver(updateHeight);
+        if (leftRef.current) observer.observe(leftRef.current);
+        
+        return () => observer.disconnect();
+    }, []);
+
+    const totalHeight = displayRows.length * rowHeight;
+    const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - buffer);
+    // 使用动态测量的 containerHeight 计算结束索引
+    const endIndex = Math.min(displayRows.length, Math.ceil((scrollTop + containerHeight) / rowHeight) + buffer);
+    
+    const visibleRows = displayRows.slice(startIndex, endIndex);
+    const offsetY = startIndex * rowHeight;
+
+    const handleScroll = (e) => {
+        setScrollTop(e.target.scrollTop);
+        // Hide tooltip on scroll to prevent misalignment
+        if(hoveredTooltip) setHoveredTooltip(null);
+    };
+
+    const leftRef = useRef(null);
+    const rightRef = useRef(null);
+    const isSyncingLeft = useRef(false);
+    const isSyncingRight = useRef(false);
+
+    const onLeftScroll = (e) => {
+        if (!isSyncingLeft.current) {
+            isSyncingRight.current = true;
+            if (rightRef.current) {
+                rightRef.current.scrollTop = e.target.scrollTop;
+                rightRef.current.scrollLeft = e.target.scrollLeft;
+            }
+        }
+        isSyncingLeft.current = false;
+        handleScroll(e);
+    };
+
+    const onRightScroll = (e) => {
+        if (!isSyncingRight.current) {
+            isSyncingLeft.current = true;
+            if (leftRef.current) {
+                leftRef.current.scrollTop = e.target.scrollTop;
+                leftRef.current.scrollLeft = e.target.scrollLeft;
+            }
+        }
+        isSyncingRight.current = false;
+        handleScroll(e);
+    };
+
+    // Tooltip Handlers
+    const handleCellMouseEnter = (e, row, cIdx) => {
+        if (row.type === 'modify' && row.diffs && row.diffs[cIdx]) {
+            const rect = e.target.getBoundingClientRect();
+            setHoveredTooltip({
+                x: rect.left + rect.width / 2,
+                y: rect.top,
+                oldVal: row.diffs[cIdx].old,
+                newVal: row.diffs[cIdx].new
+            });
+        }
+    };
+
+    const handleCellMouseLeave = () => {
+        setHoveredTooltip(null);
+    };
+
+    return (
+        <div className="flex flex-1 h-full overflow-hidden border-t border-slate-200 relative">
+            {/* Tooltip Rendered at Root of Table */}
+            <DiffTooltip data={hoveredTooltip} />
+
+            {/* Left Panel: Base */}
+            <div className="flex-1 flex flex-col border-r border-slate-300 min-w-0 bg-slate-50">
+                <div className="bg-slate-100 p-2 text-xs font-bold text-slate-500 uppercase border-b border-slate-200 sticky top-0 z-10 flex justify-between">
+                    <span>基准文件 (Base)</span>
+                    <span className="text-slate-400 font-normal">Total: {displayRows.length}</span>
+                </div>
+                <div 
+                    ref={leftRef}
+                    className="flex-1 overflow-auto relative custom-scrollbar"
+                    onScroll={onLeftScroll}
+                >
+                    <div style={{ height: totalHeight, position: 'relative' }}>
+                        <div style={{ transform: `translateY(${offsetY}px)` }}>
+                            <table className="w-full table-fixed border-collapse">
+                                <colgroup>
+                                    <col className="w-12" /> 
+                                    {columns.map((_, i) => <col key={i} className="w-32" />)}
+                                </colgroup>
+                                <thead>
+                                    <tr className="h-10 bg-slate-100 border-b border-slate-200">
+                                        <th className="sticky top-0 bg-slate-100 z-20">#</th>
+                                        {columns.map((c, i) => (
+                                            <th key={i} className="px-2 py-1 text-left text-xs font-semibold text-slate-600 truncate border-r border-slate-200 sticky top-0 bg-slate-100 z-20" title={c}>{c}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {visibleRows.map((row, idx) => {
+                                        const realIndex = startIndex + idx;
+                                        const isRemove = row.type === 'remove';
+                                        const isModify = row.type === 'modify';
+                                        const isEmpty = row.type === 'add'; 
+                                        
+                                        let bgClass = 'bg-white';
+                                        if (isRemove) bgClass = 'bg-red-50';
+                                        if (isModify) bgClass = 'bg-yellow-50';
+                                        if (isEmpty) bgClass = 'bg-slate-50/50';
+
+                                        return (
+                                            <tr key={realIndex} className={`h-10 border-b border-slate-100 text-sm ${bgClass}`}>
+                                                <td className="text-center text-xs text-slate-400 border-r border-slate-100 select-none bg-slate-50">
+                                                    {isEmpty ? '-' : realIndex + 1}
+                                                </td>
+                                                {isEmpty ? (
+                                                    <td colSpan={columns.length} className="px-4 text-xs text-slate-300 italic text-center select-none">
+                                                        (此行在基准文件中不存在)
+                                                    </td>
+                                                ) : (
+                                                    columns.map((col, cIdx) => {
+                                                        const cellVal = row.base ? row.base[cIdx] : '';
+                                                        const isCellDiff = row.diffs && row.diffs[cIdx];
+                                                        return (
+                                                            <td 
+                                                                key={cIdx} 
+                                                                className={`px-2 py-1 border-r border-slate-100 truncate relative group cursor-default ${isCellDiff ? 'bg-yellow-100 text-yellow-900 font-medium' : 'text-slate-600'}`}
+                                                                onMouseEnter={(e) => handleCellMouseEnter(e, row, cIdx)}
+                                                                onMouseLeave={handleCellMouseLeave}
+                                                            >
+                                                                <span className="block truncate" title={String(cellVal)}>{cellVal}</span>
+                                                            </td>
+                                                        );
+                                                    })
+                                                )}
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Right Panel: Target */}
+            <div className="flex-1 flex flex-col min-w-0 bg-white">
+                <div className="bg-slate-100 p-2 text-xs font-bold text-slate-500 uppercase border-b border-slate-200 sticky top-0 z-10 flex justify-between">
+                    <span>目标文件 (Target)</span>
+                </div>
+                <div 
+                    ref={rightRef}
+                    className="flex-1 overflow-auto relative custom-scrollbar"
+                    onScroll={onRightScroll}
+                >
+                    <div style={{ height: totalHeight, position: 'relative' }}>
+                        <div style={{ transform: `translateY(${offsetY}px)` }}>
+                            <table className="w-full table-fixed border-collapse">
+                                <colgroup>
+                                    <col className="w-12" />
+                                    {columns.map((_, i) => <col key={i} className="w-32" />)}
+                                </colgroup>
+                                <thead>
+                                    <tr className="h-10 bg-slate-100 border-b border-slate-200">
+                                        <th className="sticky top-0 bg-slate-100 z-20">#</th>
+                                        {columns.map((c, i) => (
+                                            <th key={i} className="px-2 py-1 text-left text-xs font-semibold text-slate-600 truncate border-r border-slate-200 sticky top-0 bg-slate-100 z-20" title={c}>{c}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {visibleRows.map((row, idx) => {
+                                        const realIndex = startIndex + idx;
+                                        const isAdd = row.type === 'add';
+                                        const isModify = row.type === 'modify';
+                                        const isEmpty = row.type === 'remove'; 
+                                        
+                                        let bgClass = 'bg-white';
+                                        if (isAdd) bgClass = 'bg-emerald-50';
+                                        if (isModify) bgClass = 'bg-yellow-50';
+                                        if (isEmpty) bgClass = 'bg-slate-50/50';
+
+                                        return (
+                                            <tr key={realIndex} className={`h-10 border-b border-slate-100 text-sm ${bgClass}`}>
+                                                <td className="text-center text-xs text-slate-400 border-r border-slate-100 select-none bg-slate-50">
+                                                    {isEmpty ? '-' : realIndex + 1}
+                                                </td>
+                                                {isEmpty ? (
+                                                    <td colSpan={columns.length} className="px-4 text-xs text-slate-300 italic text-center select-none">
+                                                        (此行已删除)
+                                                    </td>
+                                                ) : (
+                                                    columns.map((col, cIdx) => {
+                                                        const cellVal = row.target ? row.target[cIdx] : '';
+                                                        const isCellDiff = row.diffs && row.diffs[cIdx];
+                                                        return (
+                                                            <td 
+                                                                key={cIdx} 
+                                                                className={`px-2 py-1 border-r border-slate-100 truncate relative group cursor-default ${isCellDiff ? 'bg-yellow-100 text-yellow-900 font-medium' : 'text-slate-600'}`}
+                                                                onMouseEnter={(e) => handleCellMouseEnter(e, row, cIdx)}
+                                                                onMouseLeave={handleCellMouseLeave}
+                                                            >
+                                                                <span className="block truncate" title={String(cellVal)}>{cellVal}</span>
+                                                            </td>
+                                                        );
+                                                    })
+                                                )}
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const ExcelComparator = () => {
+    const [step, setStep] = useState('upload'); // upload, processing, report
+    const [files, setFiles] = useState({ f1: null, f2: null });
+    const [diffData, setDiffData] = useState(null);
+    const [activeSheet, setActiveSheet] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [showDiffOnly, setShowDiffOnly] = useState(false);
+
+    const handleFileChange = (key, e) => {
+        if (e.target.files && e.target.files[0]) {
+            setFiles(prev => ({ ...prev, [key]: e.target.files[0] }));
+        }
+    };
+
+    const processFiles = async () => {
+        if (!files.f1 || !files.f2) return;
+        setIsProcessing(true);
+        try {
+            const data1 = await parseExcelFile(files.f1);
+            const data2 = await parseExcelFile(files.f2);
+            
+            // 智能匹配 Sheet
+            const allSheets = new Set([...Object.keys(data1), ...Object.keys(data2)]);
+            const diffs = {};
+            
+            allSheets.forEach(sheet => {
+                const s1 = data1[sheet];
+                const s2 = data2[sheet];
+                if (!s1 && s2) {
+                    diffs[sheet] = { status: 'added', rows: s2.map(r => ({ type: 'add', target: r })) };
+                } else if (s1 && !s2) {
+                    diffs[sheet] = { status: 'removed', rows: s1.map(r => ({ type: 'remove', base: r })) };
+                } else {
+                    const compareRes = compareExcelSheets(s1, s2);
+                    diffs[sheet] = { status: 'compared', ...compareRes };
+                }
+            });
+
+            setDiffData(diffs);
+            setActiveSheet(Object.keys(diffs)[0]);
+            setStep('report');
+        } catch (e) {
+            console.error(e);
+            alert("解析失败，请确保文件格式正确（.xlsx, .xls, .csv）且未加密。");
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    if (step === 'upload') {
+        return (
+            <div className="flex flex-col items-center justify-center h-full animate-in fade-in zoom-in duration-300 p-8">
+                <div className="bg-emerald-50 p-6 rounded-full mb-6">
+                    <FileSpreadsheet className="w-16 h-16 text-emerald-600" />
+                </div>
+                <h2 className="text-3xl font-bold text-slate-800 mb-2">Excel 智能对比工具</h2>
+                <p className="max-w-lg text-center text-slate-500 mb-10">
+                    支持 .xlsx, .xls, .csv。上传两个表格，系统将自动匹配 Sheet 页并高亮显示增删改差异。无配置，纯自动。
+                </p>
+                
+                <div className="flex flex-col md:flex-row gap-8 w-full max-w-4xl mb-10">
+                    {['f1', 'f2'].map((k, i) => (
+                        <div key={k} className="flex-1 relative group border-2 border-dashed border-slate-300 hover:border-emerald-400 hover:bg-emerald-50/20 rounded-2xl p-8 transition-all flex flex-col items-center justify-center h-48 cursor-pointer">
+                            <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleFileChange(k, e)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                            {files[k] ? (
+                                <div className="text-center">
+                                    <FileSpreadsheet className="w-10 h-10 text-emerald-600 mx-auto mb-2" />
+                                    <p className="font-semibold text-slate-700 truncate max-w-[200px]">{files[k].name}</p>
+                                    <p className="text-xs text-slate-400">{(files[k].size/1024).toFixed(1)} KB</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <UploadCloud className="w-10 h-10 text-slate-300 mb-3 group-hover:scale-110 transition-transform" />
+                                    <p className="font-bold text-slate-600">{i===0 ? '上传基准表格 (旧)' : '上传目标表格 (新)'}</p>
+                                    <p className="text-xs text-slate-400 mt-1">点击或拖拽文件到此处</p>
+                                </>
+                            )}
+                        </div>
+                    ))}
+                </div>
+
+                <button 
+                    onClick={processFiles}
+                    disabled={!files.f1 || !files.f2 || isProcessing}
+                    className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white px-10 py-4 rounded-xl font-bold text-lg flex items-center gap-3 shadow-lg shadow-emerald-200 transition-all"
+                >
+                    {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : <Wand2 className="w-6 h-6" />}
+                    {isProcessing ? '正在智能解析对比...' : '开始全自动对比'}
+                </button>
+            </div>
+        );
+    }
+
+    const currentSheetData = diffData[activeSheet];
+    const diffCount = currentSheetData?.rows?.filter(r => r.type !== 'same').length || 0;
+
+    return (
+        <div className="flex h-full flex-col bg-white overflow-hidden animate-in fade-in duration-300">
+            {/* Header Toolbar */}
+            <div className="h-16 border-b border-slate-200 bg-white flex items-center justify-between px-4 shrink-0 shadow-sm z-20">
+                <div className="flex items-center gap-4">
+                    <button onClick={() => setStep('upload')} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500">
+                        <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <div>
+                        <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                            {files.f1.name} <ArrowRightLeft className="w-4 h-4 text-slate-400" /> {files.f2.name}
+                        </h2>
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-medium">Sheet: {activeSheet}</span>
+                            <span>•</span>
+                            <span className={diffCount > 0 ? "text-red-500 font-bold" : "text-emerald-500"}>
+                                {diffCount} 处差异
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded border border-slate-100">
+                        <Info className="w-3 h-3" />
+                        悬停查看变更详情
+                    </div>
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors">
+                        <Eye className="w-4 h-4" />
+                        <span className="select-none">只看差异</span>
+                        <input 
+                            type="checkbox" 
+                            checked={showDiffOnly} 
+                            onChange={(e) => setShowDiffOnly(e.target.checked)} 
+                            className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 ml-1" 
+                        />
+                    </label>
+                </div>
+            </div>
+
+            <div className="flex flex-1 min-h-0">
+                {/* Sheet Sidebar */}
+                <div className="w-64 border-r border-slate-200 bg-slate-50 flex flex-col overflow-hidden shrink-0">
+                    <div className="p-3 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase">
+                        Sheet 列表
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        {Object.keys(diffData).map(sheet => {
+                            const info = diffData[sheet];
+                            const dCount = info.rows?.filter(r => r.type !== 'same').length || 0;
+                            return (
+                                <button 
+                                    key={sheet}
+                                    onClick={() => setActiveSheet(sheet)}
+                                    className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between transition-all ${activeSheet === sheet ? 'bg-white shadow text-emerald-700 font-medium ring-1 ring-emerald-200' : 'text-slate-600 hover:bg-slate-200/50'}`}
+                                >
+                                    <span className="truncate" title={sheet}>{sheet}</span>
+                                    {dCount > 0 && <span className="bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full font-bold">{dCount}</span>}
+                                </button>
+                            )
+                        })}
+                    </div>
+                </div>
+
+                {/* Main Diff Area */}
+                <div className="flex-1 min-w-0 bg-white relative">
+                    {currentSheetData && currentSheetData.columns ? (
+                        <VirtualExcelTable 
+                            columns={currentSheetData.columns} 
+                            rows={currentSheetData.rows} 
+                            showDiffOnly={showDiffOnly} 
+                        />
+                    ) : (
+                        <div className="flex items-center justify-center h-full text-slate-400">
+                            该 Sheet 页无法对比 (可能仅存在于一个文件中)
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+/* ==========================================================================
+   5. 首页与应用入口 (Entry)
+   建议拆分为: src/components/LandingPage.jsx
+   ========================================================================== 
+*/
+
+const LandingPage = ({ onSelectTool }) => {
+    const tools = [
+        {
+            id: 'sql',
+            title: 'SQLite 数据库对比',
+            description: '深度对比两个 SQLite 数据库文件 (.db, .sqlite)。支持主键推断、正则忽略、差异导出。',
+            icon: Database,
+            color: 'bg-blue-500',
+            textColor: 'text-blue-600',
+            bgColor: 'bg-blue-50',
+            borderColor: 'border-blue-100'
+        },
+        {
+            id: 'excel',
+            title: 'Excel 表格对比',
+            description: '快速对比两个 Excel 文件 (.xlsx, .csv)。高亮显示单元格差异，悬浮查看变更详情。',
+            icon: FileSpreadsheet,
+            color: 'bg-emerald-500',
+            textColor: 'text-emerald-600',
+            bgColor: 'bg-emerald-50',
+            borderColor: 'border-emerald-100'
+        }
+    ];
+
+    return (
+        <div className="flex flex-col items-center justify-center h-full px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="text-center mb-12">
+                <h1 className="text-4xl font-extrabold text-slate-800 mb-4 tracking-tight">
+                    数据差异对比工具集
+                </h1>
+                <p className="text-lg text-slate-500 max-w-2xl mx-auto">
+                    选择您需要的工具，快速发现数据变更。专为开发者和数据分析师设计，安全、本地化运行。
+                </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl w-full">
+                {tools.map((tool) => (
+                    <div 
+                        key={tool.id}
+                        onClick={() => onSelectTool(tool.id)}
+                        className={`group relative p-8 rounded-2xl border ${tool.borderColor} bg-white hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer overflow-hidden`}
+                    >
+                        <div className={`absolute top-0 right-0 w-32 h-32 ${tool.bgColor} rounded-bl-full opacity-50 transition-transform group-hover:scale-110`} />
+                        
+                        <div className="relative z-10">
+                            <div className={`w-14 h-14 ${tool.bgColor} ${tool.textColor} rounded-xl flex items-center justify-center mb-6 shadow-sm`}>
+                                <tool.icon className="w-8 h-8" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-slate-800 mb-3 group-hover:text-slate-900">
+                                {tool.title}
+                            </h3>
+                            <p className="text-slate-500 leading-relaxed mb-6">
+                                {tool.description}
+                            </p>
+                            <div className="flex items-center font-semibold text-sm text-slate-400 group-hover:text-slate-600 transition-colors">
+                                启动工具 <ChevronRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+export default function App() {
+  const [currentTool, setCurrentTool] = useState('home'); // home, sql, excel
+
+  const renderContent = () => {
+      switch(currentTool) {
+          case 'sql':
+              return <SqlComparator />;
+          case 'excel':
+              return <ExcelComparator />;
+          default:
+              return <LandingPage onSelectTool={setCurrentTool} />;
+      }
+  };
+
+  return (
+    <div className="h-screen bg-slate-50 text-slate-800 font-sans flex flex-col overflow-hidden">
+        <header className="bg-slate-900 text-white shadow-lg shrink-0 z-50">
+            <div className="w-full px-6 h-14 flex items-center justify-between">
+                <div 
+                    className="flex items-center gap-3 cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={() => setCurrentTool('home')}
+                >
+                    <div className="bg-slate-800 p-1.5 rounded-lg">
+                        <ArrowRightLeft className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <h1 className="font-bold text-lg tracking-wide">
+                        DB Diff Tool <span className="opacity-50 font-normal ml-1">| Suite</span>
+                    </h1>
+                </div>
+
+                {currentTool !== 'home' && (
+                    <button 
+                        onClick={() => setCurrentTool('home')}
+                        className="flex items-center gap-2 text-sm text-slate-300 hover:text-white transition-colors bg-slate-800/50 hover:bg-slate-800 px-3 py-1.5 rounded-full"
+                    >
+                        <Home className="w-4 h-4" />
+                        返回首页
+                    </button>
+                )}
+            </div>
+        </header>
+        
+        <main className="flex-1 w-full px-4 py-4 flex flex-col min-h-0 overflow-hidden relative">
+            {renderContent()}
         </main>
     </div>
   );
